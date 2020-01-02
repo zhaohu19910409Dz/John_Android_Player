@@ -1,4 +1,4 @@
-package com.john.testcplusplus;
+package com.john.johnplayer;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -15,7 +15,7 @@ import android.widget.Button;
 public class MainActivity extends AppCompatActivity implements View.OnClickListener{
     private SurfaceView surfaceView;
     private SurfaceHolder surfaceHolder;
-    private com.john.testcplusplus.MediaPlayer player;
+    private com.john.johnplayer.MediaPlayer player;
     private Button btPlay,btPause;
 
 
@@ -28,7 +28,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         ActivityCompat.requestPermissions(this,new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
         ActivityCompat.requestPermissions(this,new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
 
-        player = new com.john.testcplusplus.MediaPlayer();
+        player = new com.john.johnplayer.MediaPlayer();
 
         surfaceView = (SurfaceView)findViewById(R.id.surfaceView);
         surfaceHolder = surfaceView.getHolder();

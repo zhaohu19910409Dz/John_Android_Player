@@ -1,4 +1,4 @@
-package com.john.testcplusplus;
+package com.john.johnplayer;
 
 import android.view.Surface;
 
