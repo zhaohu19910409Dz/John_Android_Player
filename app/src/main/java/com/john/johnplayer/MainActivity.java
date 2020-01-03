@@ -37,10 +37,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         btPlay.setOnClickListener(this);
         btPause = (Button)findViewById(R.id.btPause);
         btPause.setOnClickListener(this);
-
-        //String p = Environment.getExternalStorageDirectory()+"/1.mp4";
-        //player.playVideo(p,surfaceHolder.getSurface());
-
     }
 
     public void onClick(View v)

@@ -21,12 +21,12 @@ extern "C"
 #include "libavutil/imgutils.h"
 }
 
-#include <android/log.h>
-#define LOG(...) __android_log_print(ANDROID_LOG_INFO,"MediaCore",__VA_ARGS__)
-
 #include <pthread.h>
 #include "JQueue.h"
 #include "JQueue.cpp"
+#include <jni.h>
+#include <android/log.h>
+#define LOG(...) __android_log_print(ANDROID_LOG_INFO,"MediaCore",__VA_ARGS__)
 
 using namespace std;
 
@@ -77,6 +77,7 @@ public:
 
 
     void PrintErrLog(int errID);
+
     //read thread to video and audio packet queue
     pthread_t  pReadThreadID;
     static void* readThread(void *params)
@@ -86,7 +87,6 @@ public:
     }
 
     //video decode thread to video frame queue
-
     JQueue<AVPacket> *pVideoPacketQueue;
     JQueue<AVPacket> *pAudioPacketQueue;
     pthread_t  pVideoDecodeThreadID;
@@ -96,6 +96,7 @@ public:
         MediaCore* core = (MediaCore*)params;
         core->DecodeVideo();
     }
+
     //audio decode thread to audio frame queue
     pthread_t pAudioDecodeThreadID;
     JQueue<AVFrame> *pAudioFrameQueue;
@@ -104,6 +105,7 @@ public:
         MediaCore* core = (MediaCore*)params;
         core->DecodeAudio();
     }
+
     //video render thread
     pthread_t pVideoRenderThreadID;
     static void* renderVideoThread(void *params)
@@ -112,6 +114,4 @@ public:
         core->RenderVideo();
     }
 };
-
-
 #endif //TESTCPLUSPLUS_MEDIACORE_H
