@@ -65,152 +65,7 @@ void MediaCore::InitFFmpeg()
 void MediaCore::Start()
 {
     LOG("Start ReadThread\r\n");
-    //pthread_create(&pReadThreadID, NULL, readThread, this);
-    ReadFile();
-#if 0
-    int err;
-    err = access(fileName.c_str(),0);
-    if(err < 0)
-    {
-        LOG("Not find file\r\n");
-    }
-
-    //3:open file
-    err = avformat_open_input(&pContext->avFormatCtx, fileName.c_str(), pContext->iFormatCtx, &pContext->format_opts);
-    if(err < 0)
-    {
-        PrintErrLog(err);
-        return;
-    }
-
-    //4:find video stream info
-    err = avformat_find_stream_info(pContext->avFormatCtx, NULL);
-    if(err < 0)
-    {
-        LOG("Could not find stream info\r\n");
-        return;
-    }
-
-    int video_stream_index = -1;
-    int audio_stream_index = -1;
-    for(int i = 0; i < pContext->avFormatCtx->nb_streams; i++)
-    {
-        if(pContext->avFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
-        {
-            video_stream_index = i;
-        }
-        else if(pContext->avFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
-        {
-            audio_stream_index = i;
-        }
-    }
-
-    if(video_stream_index == -1)
-    {
-        LOG("Could not find video stream\r\n");
-        return;
-    }
-
-    if(audio_stream_index == -1)
-    {
-        LOG("Could not find audio stream\r\n");
-    }
-    //5:find video decoder context
-    //6:init video code
-    pContext->videoCtx = avcodec_alloc_context3(NULL);
-    avcodec_parameters_to_context(pContext->videoCtx, pContext->avFormatCtx->streams[video_stream_index]->codecpar);
-
-    //7:find  decoder
-    AVCodec* video_codec = avcodec_find_decoder(pContext->videoCtx->codec_id);
-    if(video_codec == NULL)
-    {
-        LOG("Could not find video codec\r\n");
-        return ;
-    }
-    //8:open video decoder
-    err = avcodec_open2(pContext->videoCtx, video_codec, NULL);
-    if(err < 0)
-    {
-        LOG("Could not find video stream\r\n");
-        return;
-    }
-    //get video width height
-    int videoWidth = pContext->videoCtx->width;
-    int videoHeight = pContext->videoCtx->height;
-
-    err = ANativeWindow_setBuffersGeometry(pWindow, videoWidth, videoHeight,WINDOW_FORMAT_RGBA_8888);
-    if(err < 0)
-    {
-        LOG("Could not set native window buffer");
-        ANativeWindow_release(pWindow);
-        return ;
-    }
-    ANativeWindow_Buffer window_buffer;
-    AVPacket *packet = av_packet_alloc();
-    AVFrame *frame = av_frame_alloc();
-    AVFrame *rgba_frame = av_frame_alloc();
-
-    int buffer_size = av_image_get_buffer_size(AV_PIX_FMT_RGBA, videoWidth, videoHeight, 1);
-    uint8_t* out_buffer = (uint8_t*)av_malloc(buffer_size * sizeof(uint8_t));
-    av_image_fill_arrays(rgba_frame->data, rgba_frame->linesize, out_buffer, AV_PIX_FMT_RGBA, videoWidth, videoHeight,1);
-    struct SwsContext *data_convert_contex = sws_getContext(
-            videoWidth, videoHeight, pContext->videoCtx->pix_fmt,
-            videoWidth, videoHeight, AV_PIX_FMT_RGBA,
-            SWS_BICUBIC, NULL, NULL, NULL);
-
-    while(av_read_frame(pContext->avFormatCtx, packet) >= 0)
-    {
-        if(packet->stream_index == video_stream_index)
-        {
-            err = avcodec_send_packet(pContext->videoCtx, packet);
-            if(err < 0 && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
-            {
-                LOG("Codec step 1 fail\r\n");
-                return;
-            }
-
-            err = avcodec_receive_frame(pContext->videoCtx, frame);
-            if(err < 0 && err != AVERROR_EOF)
-            {
-                LOG("Codec step2 faild\r\n");
-                return ;
-            }
-
-            err = sws_scale(
-                    data_convert_contex,
-                    (const uint8_t* const*)frame->data, frame->linesize,
-                    0,videoHeight,
-                    rgba_frame->data, rgba_frame->linesize);
-            if(err < 0)
-            {
-                //LOG("Data convert fail\r\n");
-                PrintErrLog(err);
-                return;
-            }
-
-            err = ANativeWindow_lock(pWindow,&window_buffer, NULL);
-            if(err < 0)
-            {
-                LOG("Could not lock native window\r\n");
-            }
-            else
-            {
-                uint8_t *bits = (uint8_t *) window_buffer.bits;
-                for (int h = 0; h < videoHeight; h++)
-                {
-                    memcpy(bits + h * window_buffer.stride * 4,
-                           out_buffer + h * rgba_frame->linesize[0],
-                           rgba_frame->linesize[0]);
-                }
-            }
-            ANativeWindow_unlockAndPost(pWindow);
-        }
-        else if(packet->stream_index == audio_stream_index)
-        {
-        }
-    }
-    av_packet_unref(packet);
-#endif
+    pthread_create(&pReadThreadID, NULL, readThread, this);
 }
 
 /*
@@ -218,7 +73,6 @@ void MediaCore::Start()
  */
 bool MediaCore::ReadFile()
 {
-    LOG("OpenFile\r\n");
     int err;
     err = access(fileName.c_str(),0);
     if(err < 0)
@@ -233,17 +87,6 @@ bool MediaCore::ReadFile()
         PrintErrLog(err);
         return false;
     }
-#if 0
-    if(pContext->scan_all_pmts_set)
-        av_dict_set(&pContext->format_opts, "scan_all_pmts", NULL, AV_DICT_MATCH_CASE);
-
-    AVDictionaryEntry* t;
-    if((t = av_dict_get(pContext->format_opts, "", NULL, AV_DICT_IGNORE_SUFFIX)))
-    {
-        LOG("Option %s not found\r\n",t->key);
-        return false;
-    }
-#endif
 
     //4:find video stream info
     err = avformat_find_stream_info(pContext->avFormatCtx, NULL);
@@ -253,139 +96,49 @@ bool MediaCore::ReadFile()
         return false;
     }
 
-    int video_stream_index = -1;
-    int audio_stream_index = -1;
+    pContext->video_stream = -1;
+    pContext->audio_stream = -1;
     for(int i = 0; i < pContext->avFormatCtx->nb_streams; i++)
     {
         if(pContext->avFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
         {
-            video_stream_index = i;
+            pContext->video_stream = i;
         }
         else if(pContext->avFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
         {
-            audio_stream_index = i;
+            pContext->audio_stream = i;
         }
-    }
-
-    if(video_stream_index == -1)
-    {
-        LOG("Could not find video stream\r\n");
-        return false;
-    }
-
-    if(audio_stream_index == -1)
-    {
-        LOG("Could not find audio stream\r\n");
     }
     //5:find video decoder context
     //6:init video code
-    if(video_stream_index != -1)
+    if(pContext->video_stream != -1)
     {
-        LOG("open video stream data\t\n");
-        //StreamComponentOpen(video_stream_index);
-        pContext->videoCtx = avcodec_alloc_context3(NULL);
-        avcodec_parameters_to_context(pContext->videoCtx, pContext->avFormatCtx->streams[video_stream_index]->codecpar);
-
-        //7:find  decoder
-        AVCodec* video_codec = avcodec_find_decoder(pContext->videoCtx->codec_id);
-        if(video_codec == NULL)
-        {
-            LOG("Could not find video codec\r\n");
-            return false;
-        }
-        //8:open video decoder
-        err = avcodec_open2(pContext->videoCtx, video_codec, NULL);
-        if(err < 0)
-        {
-            LOG("Could not find video stream\r\n");
-            return false;
-        }
+        StreamComponentOpen(pContext->video_stream);
     }
 
-    if(audio_stream_index != -1)
-    {
-        LOG("open audio stream data\t\n");
-        //StreamComponentOpen(audio_stream_index);
-    }
-#ifdef TestCode
-    ANativeWindow_Buffer window_buffer;
-    int videoWidth = pContext->videoCtx->width;
-    int videoHeight = pContext->videoCtx->height;
-
-    err = ANativeWindow_setBuffersGeometry(pWindow, videoWidth, videoHeight,WINDOW_FORMAT_RGBA_8888);
-    if(err < 0)
-    {
-        LOG("Could not set native window buffer");
-        ANativeWindow_release(pWindow);
-        return false;
-    }
-    AVFrame *frame = av_frame_alloc();
-    AVFrame *rgba_frame = av_frame_alloc();
-
-    int buffer_size = av_image_get_buffer_size(AV_PIX_FMT_RGBA, videoWidth, videoHeight, 1);
-    uint8_t* out_buffer = (uint8_t*)av_malloc(buffer_size * sizeof(uint8_t));
-    av_image_fill_arrays(rgba_frame->data, rgba_frame->linesize, out_buffer, AV_PIX_FMT_RGBA, videoWidth, videoHeight,1);
-    struct SwsContext *data_convert_contex = sws_getContext( \
-            videoWidth, videoHeight, pContext->videoCtx->pix_fmt, \
-            videoWidth, videoHeight, AV_PIX_FMT_RGBA, \
-            SWS_BICUBIC, NULL, NULL, NULL);
-#endif
     AVPacket *packet = av_packet_alloc();
+    int ret;
     while(av_read_frame(pContext->avFormatCtx, packet) >= 0)
     {
-        if(packet->stream_index == video_stream_index)
-        {
-            //AVPacket* pVideoPacket = pVideoPacketQueue->queue_peek_writable();
-            //*pVideoPacket = *packet;
-            //pVideoPacketQueue->queue_push();
-            int err = avcodec_send_packet(pContext->videoCtx, packet);
-            if(err < 0 && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
-            {
-                LOG("Codec step 1 fail\r\n");
-                return false;
-            }
-            err = avcodec_receive_frame(pContext->videoCtx, frame);
-            if(err < 0 && err != AVERROR_EOF)
-            {
-                LOG("Codec step2 faild\r\n");
-                return  false;
-            }
-            err = sws_scale(
-                    data_convert_contex,
-                    (const uint8_t* const*)frame->data, frame->linesize,
-                    0,videoHeight,
-                    rgba_frame->data, rgba_frame->linesize);
-            if(err < 0)
-            {
-                LOG("Data convert fail\r\n");
-                PrintErrLog(err);
-                return false;
-            }
+//        ret = av_read_frame(pContext->avFormatCtx, packet);
+//        if(ret < 0)
+//        {
+//            if((ret == AVERROR_EOF || avio_feof(pContext->avFormatCtx->pb)) && !pContext->eof)
+//            {
+//                //insert empty packet means read file end
+//                //if()
+//            }
+//        }
 
-            //AVFrame* pFrame = pVideoFrameQueue->queue_peek_writable();
-            //*pFrame = *rgba_frame;
-            //pVideoFrameQueue->queue_push();
-            err = ANativeWindow_lock(pWindow,&window_buffer, NULL);
-            if(err < 0)
-            {
-                LOG("Could not lock native window\r\n");
-            }
-            else
-            {
-                uint8_t *bits = (uint8_t *) window_buffer.bits;
-                LOG("window buffer stride:%d,linesize[0]:%d\r\n",window_buffer.stride,rgba_frame->linesize[0]);
-                for (int h = 0; h < videoHeight; h++)
-                {
-                    memcpy(bits + h * window_buffer.stride * 4,
-                           rgba_frame->data + h * rgba_frame->linesize[0],
-                           rgba_frame->linesize[0]);
-                }
-            }
-            ANativeWindow_unlockAndPost(pWindow);
-        }
-        else if(packet->stream_index == audio_stream_index)
+        if(packet->stream_index == pContext->video_stream)
         {
-            //AVPacket *pAudioPacket = pAudioPacketQueue->queue_peek_writable();
+            AVPacket* pVideoPacket = pVideoPacketQueue->queue_peek_writable();
+            *pVideoPacket = *packet;
+            pVideoPacketQueue->queue_push();
+        }
+        else if(packet->stream_index == pContext->audio_stream)
+        {
+            //AVPacket* pAudioPacket = pAudioPacketQueue->queue_peek_writable();
             //*pAudioPacket = *packet;
             //pAudioPacketQueue->queue_push();
         }
@@ -426,7 +179,7 @@ bool MediaCore::DecodeVideo()
     while(true)
     {
         AVPacket* packet = pVideoPacketQueue->queue_peek_readable();
-        int err = avcodec_send_packet(pContext->videoCtx, packet);
+        err = avcodec_send_packet(pContext->videoCtx, packet);
         if(err < 0 && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
         {
             LOG("Codec step 1 fail\r\n");
@@ -437,23 +190,21 @@ bool MediaCore::DecodeVideo()
         if(err < 0 && err != AVERROR_EOF)
         {
             LOG("Codec step2 faild\r\n");
-            return  false;
+            return false;
         }
-        err = sws_scale( \
-                data_convert_contex, \
-                (const uint8_t* const*)frame->data, frame->linesize, \
-                0,videoHeight, \
+
+        err = sws_scale(
+                data_convert_contex,
+                (const uint8_t* const*)frame->data, frame->linesize,
+                0,videoHeight,
                 rgba_frame->data, rgba_frame->linesize);
         if(err < 0)
         {
-            LOG("Data convert fail\r\n");
+            //LOG("Data convert fail\r\n");
             PrintErrLog(err);
             return false;
         }
 
-        //AVFrame* pFrame = pVideoFrameQueue->queue_peek_writable();
-        //*pFrame = *rgba_frame;
-        //pVideoFrameQueue->queue_push();
         err = ANativeWindow_lock(pWindow,&window_buffer, NULL);
         if(err < 0)
         {
@@ -462,11 +213,10 @@ bool MediaCore::DecodeVideo()
         else
         {
             uint8_t *bits = (uint8_t *) window_buffer.bits;
-            //LOG("window buffer stride:%d,linesize[0]:%d\r\n",window_buffer.stride,rgba_frame->linesize[0]);
             for (int h = 0; h < videoHeight; h++)
             {
-                memcpy(bits + h * window_buffer.stride * 4, \
-                       rgba_frame->data + h * rgba_frame->linesize[0], \
+                memcpy(bits + h * window_buffer.stride * 4,
+                       out_buffer + h * rgba_frame->linesize[0],
                        rgba_frame->linesize[0]);
             }
         }
@@ -613,7 +363,7 @@ int MediaCore::StreamComponentOpen(int stream_index)
             //decoder_init
             //decoder_start
             LOG("Start Video Decode Thread\r\n");
-            //pthread_create(&pVideoDecodeThreadID, NULL, decodeVideoThread, this);
+            pthread_create(&pVideoDecodeThreadID, NULL, decodeVideoThread, this);
             pContext->queue_attachments_req = 1;
             break;
         //case AVMEDIA_TYPE_SUBTITLE:

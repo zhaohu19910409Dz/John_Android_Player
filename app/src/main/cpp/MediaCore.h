@@ -41,6 +41,8 @@ typedef struct{
     int              eof;
     //audio data
     int              last_audio_stream;
+    int              audio_stream;
+    AVStream         *audio_st;
 
     //video data
     int              last_video_stream;
