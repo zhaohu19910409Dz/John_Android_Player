@@ -5,11 +5,30 @@
 #include "MediaCore.h"
 MediaCore* MediaCore::pInstance = NULL;
 
-#define TestCode
 static int ffmpeg_interrupt(void* ctx)
 {
     MediaCore* pMediaCore = (MediaCore*)ctx;
     return 0;
+}
+
+void pcmCallBack(SLAndroidSimpleBufferQueueItf slBufferQueueItf, void * context)
+{
+    MediaCore* pCtx = (MediaCore*)context;
+    pCtx->buffersize = 0;
+
+    AVFrame* pFrame = pCtx->pAudioFrameQueue->queue_peek_readable();
+#if 0
+    swr_convert(pCtx->getSwrContext(), &pCtx->buffer, 44100 * 2, (const uint8_t**)pFrame->data, pFrame->nb_samples);
+    int size = av_samples_get_buffer_size(NULL, pCtx->getChannels(), pFrame->nb_samples, AV_SAMPLE_FMT_S16, 1);
+    pCtx->buffersize = size;
+
+    if(pCtx->buffer!=NULL && pCtx->buffersize!=0)
+    {
+        //将得到的数据加入到队列中
+        (*slBufferQueueItf)->Enqueue(slBufferQueueItf,pCtx->buffer,pCtx->buffersize);
+    }
+#endif
+    pCtx->pAudioFrameQueue->queue_next();
 }
 
 MediaCore::MediaCore():pContext(NULL),pWindow(NULL)
@@ -22,7 +41,49 @@ MediaCore::MediaCore():pContext(NULL),pWindow(NULL)
 
     pVideoFrameQueue = new JQueue<AVFrame>(3,"videoFrameQueue");
     pAudioFrameQueue = new JQueue<AVFrame>(9,"audioFrameQueue");
+}
 
+MediaCore::~MediaCore()
+{
+    if(pContext)
+    {
+        delete pContext;
+        pContext = NULL;
+    }
+
+    if(pVideoPacketQueue)
+    {
+        delete pVideoPacketQueue;
+        pVideoPacketQueue = NULL;
+    }
+
+    if(pAudioPacketQueue)
+    {
+        delete pAudioPacketQueue;
+        pAudioPacketQueue = NULL;
+    }
+
+    if(pVideoFrameQueue)
+    {
+        delete pVideoFrameQueue;
+        pVideoFrameQueue = NULL;
+    }
+
+    if(pAudioFrameQueue)
+    {
+        delete pAudioFrameQueue;
+        pAudioFrameQueue = NULL;
+    }
+    realseResource();
+}
+
+void MediaCore::releaseInstance()
+{
+    if(pInstance)
+    {
+        delete pInstance;
+        pInstance = NULL;
+    }
 }
 
 MediaCore* MediaCore::getInstance()
@@ -116,19 +177,58 @@ bool MediaCore::ReadFile()
         StreamComponentOpen(pContext->video_stream);
     }
 
+    if(pContext->audio_stream != -1)
+    {
+        StreamComponentOpen(pContext->audio_stream);
+    }
+
     AVPacket *packet = av_packet_alloc();
     int ret;
-    while(av_read_frame(pContext->avFormatCtx, packet) >= 0)
+    while(true/*av_read_frame(pContext->avFormatCtx, packet) >= 0*/)
     {
-//        ret = av_read_frame(pContext->avFormatCtx, packet);
-//        if(ret < 0)
-//        {
-//            if((ret == AVERROR_EOF || avio_feof(pContext->avFormatCtx->pb)) && !pContext->eof)
-//            {
-//                //insert empty packet means read file end
-//                //if()
-//            }
-//        }
+        ret = av_read_frame(pContext->avFormatCtx, packet);
+        if(ret < 0)
+        {
+            if((ret == AVERROR_EOF || avio_feof(pContext->avFormatCtx->pb)) && !pContext->eof)
+            {
+                //insert empty packet means read file end
+                if(pContext->video_stream != -1)
+                {
+                    //put empty packet into queue
+                    AVPacket emptyPacket;
+                    av_init_packet(&emptyPacket);
+                    emptyPacket.size = 0;
+                    emptyPacket.data = NULL;
+                    emptyPacket.stream_index = pContext->video_stream;
+                    //emptyPacket.
+
+                    AVPacket* pVideoPacket = pVideoPacketQueue->queue_peek_writable();
+                    *pVideoPacket = emptyPacket;
+                    pVideoPacketQueue->queue_push();
+                }
+                if(pContext->audio_stream != -1)
+                {
+                    AVPacket emptyPacket;
+                    av_init_packet(&emptyPacket);
+                    emptyPacket.size = 0;
+                    emptyPacket.data = NULL;
+                    emptyPacket.stream_index = pContext->audio_stream;
+                    //emptyPacket.
+
+                    AVPacket* pAudioPacket = pAudioPacketQueue->queue_peek_writable();
+                    *pAudioPacket = emptyPacket;
+                    pAudioPacketQueue->queue_push();
+                }
+                pContext->eof = 1;
+            }
+
+            if(pContext->avFormatCtx->pb && pContext->avFormatCtx->pb->error)
+                break;
+        }
+        else
+        {
+            pContext->eof = 0;
+        }
 
         if(packet->stream_index == pContext->video_stream)
         {
@@ -148,7 +248,6 @@ bool MediaCore::ReadFile()
 
 bool MediaCore::DecodeVideo()
 {
-#if 1
     AVFrame *frame = av_frame_alloc();
     AVFrame *rgba_frame = av_frame_alloc();
 
@@ -163,9 +262,6 @@ bool MediaCore::DecodeVideo()
             videoWidth, videoHeight, pContext->videoCtx->pix_fmt, \
             videoWidth, videoHeight, AV_PIX_FMT_RGBA, \
             SWS_BICUBIC, NULL, NULL, NULL);
-#endif
-    LOG("Start Render Video Thread\r\n");
-    //pthread_create(&pVideoRenderThreadID, NULL, renderVideoThread, this);
 
     ANativeWindow_Buffer window_buffer;
     int err = ANativeWindow_setBuffersGeometry(pWindow, videoWidth, videoHeight,WINDOW_FORMAT_RGBA_8888);
@@ -178,98 +274,113 @@ bool MediaCore::DecodeVideo()
 
     while(true)
     {
-        AVPacket* packet = pVideoPacketQueue->queue_peek_readable();
-        err = avcodec_send_packet(pContext->videoCtx, packet);
-        if(err < 0 && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
+        if(!pContext->bPause)
         {
-            LOG("Codec step 1 fail\r\n");
-            return false;
-        }
+            AVPacket* packet = pVideoPacketQueue->queue_peek_readable();
+            err = avcodec_send_packet(pContext->videoCtx, packet);
+            if(err < 0 && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
+            {
+                LOG("Codec step 1 fail\r\n");
+                return false;
+            }
 
-        err = avcodec_receive_frame(pContext->videoCtx, frame);
-        if(err < 0 && err != AVERROR_EOF)
-        {
-            LOG("Codec step2 faild\r\n");
-            return false;
-        }
+            err = avcodec_receive_frame(pContext->videoCtx, frame);
+            if(err < 0 && err != AVERROR_EOF)
+            {
+                LOG("Codec step2 faild\r\n");
+                return false;
+            }
 
-        err = sws_scale(
-                data_convert_contex,
-                (const uint8_t* const*)frame->data, frame->linesize,
-                0,videoHeight,
-                rgba_frame->data, rgba_frame->linesize);
-        if(err < 0)
-        {
-            //LOG("Data convert fail\r\n");
-            PrintErrLog(err);
-            return false;
-        }
+            frame->pts = frame->best_effort_timestamp;
+            err = sws_scale( \
+                    data_convert_contex, \
+                    (const uint8_t* const*)frame->data, frame->linesize, \
+                    0,videoHeight, \
+                    rgba_frame->data, rgba_frame->linesize);
+            if(err < 0)
+            {
+                //LOG("Data convert fail\r\n");
+                PrintErrLog(err);
+                return false;
+            }
 
-        err = ANativeWindow_lock(pWindow,&window_buffer, NULL);
-        if(err < 0)
-        {
-            LOG("Could not lock native window\r\n");
+            err = ANativeWindow_lock(pWindow,&window_buffer, NULL);
+            if(err < 0)
+            {
+                LOG("Could not lock native window\r\n");
+            }
+            else
+            {
+                uint8_t *bits = (uint8_t *) window_buffer.bits;
+                for (int h = 0; h < videoHeight; h++)
+                {
+                    memcpy(bits + h * window_buffer.stride * 4,
+                           out_buffer + h * rgba_frame->linesize[0],
+                           rgba_frame->linesize[0]);
+                }
+            }
+            ANativeWindow_unlockAndPost(pWindow);
+            pVideoPacketQueue->queue_next();
         }
         else
         {
-            uint8_t *bits = (uint8_t *) window_buffer.bits;
-            for (int h = 0; h < videoHeight; h++)
-            {
-                memcpy(bits + h * window_buffer.stride * 4,
-                       out_buffer + h * rgba_frame->linesize[0],
-                       rgba_frame->linesize[0]);
-            }
+            LOG("pause\r\n");
         }
-        ANativeWindow_unlockAndPost(pWindow);
-        pVideoPacketQueue->queue_next();
     }
 }
 
 bool MediaCore::DecodeAudio()
 {
+    AVPacket* pPacket = (AVPacket*)av_malloc(sizeof(AVPacket));
+    AVFrame* pFrame = av_frame_alloc();
+    pContext->swrContext = swr_alloc();
 
-}
+    int length = 0;
+    int got_frame;
+    //uint8_t *out_buffer = (uint8_t*)av_malloc(44100 * 2);
+    buffer = (uint8_t*)av_malloc(44100 * 2);
+    uint64_t out_ch_layout = AV_CH_LAYOUT_STEREO;
 
-bool MediaCore::RenderVideo()
-{
-#if 1
-    int err;
-    ANativeWindow_Buffer window_buffer;
-    int videoWidth = pContext->videoCtx->width;
-    int videoHeight = pContext->videoCtx->height;
+    enum AVSampleFormat out_format = AV_SAMPLE_FMT_S16;
+    int out_sample_rate = pContext->sample_rate;
 
-    err = ANativeWindow_setBuffersGeometry(pWindow, videoWidth, videoHeight,WINDOW_FORMAT_RGBA_8888);
-    if(err < 0)
-    {
-        LOG("Could not set native window buffer");
-        ANativeWindow_release(pWindow);
-        return false;
-    }
-#endif
+    swr_alloc_set_opts(pContext->swrContext, out_ch_layout, out_format, out_sample_rate,
+            pContext->audioCtx->channel_layout, pContext->audioCtx->sample_fmt, pContext->audioCtx->sample_rate, 0, NULL);
+    swr_init(pContext->swrContext);
+
+    int  out_channer_nb = av_get_channel_layout_nb_channels(AV_CH_LAYOUT_STEREO);
+
     while(true)
     {
-        AVFrame* rgba_frame = pVideoFrameQueue->queue_peek_readable();
-
-        int err = ANativeWindow_lock(pWindow,&window_buffer, NULL);
-        if(err < 0)
+        if(!pContext->bPause)
         {
-            LOG("Could not lock native window\r\n");
-        }
-        else
-        {
-            uint8_t *bits = (uint8_t *) window_buffer.bits;
-            //LOG("window buffer stride:%d,linesize[0]:%d\r\n",window_buffer.stride,rgba_frame->linesize[0]);
-            for (int h = 0; h < 15/*videoHeight*/; h++)
+            AVPacket* packet = pAudioPacketQueue->queue_peek_readable();
+            int err = avcodec_send_packet(pContext->audioCtx, packet);
+            if(err < 0 && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
             {
-                memcpy(bits + h * window_buffer.stride * 4, \
-                       rgba_frame->data + h * rgba_frame->linesize[0], \
-                       rgba_frame->linesize[0]);
+                LOG("Codec step 1 fail\r\n");
+                return false;
             }
-        }
-        ANativeWindow_unlockAndPost(pWindow);
 
-        pVideoFrameQueue->queue_next();
-        usleep(20);
+            err = avcodec_receive_frame(pContext->audioCtx, pFrame);
+            if(err < 0 && err != AVERROR_EOF)
+            {
+                LOG("Codec step2 faild\r\n");
+                return false;
+            }
+
+            AVRational tb = (AVRational){1,pFrame->sample_rate};
+            if(pFrame->pts != AV_NOPTS_VALUE)
+            {
+                pFrame->pts = av_rescale_q(pFrame->pts, pContext->audioCtx->pkt_timebase, tb);
+            }
+
+            AVFrame* f = pAudioFrameQueue->queue_peek_writable();
+            *f = *pFrame;
+            pAudioFrameQueue->queue_push();
+
+            pAudioPacketQueue->queue_next();
+        }
     }
 }
 
@@ -315,7 +426,9 @@ int MediaCore::StreamComponentOpen(int stream_index)
     switch (avctx->codec_type)
     {
         case AVMEDIA_TYPE_AUDIO:
+            pContext->audioCtx = avctx;
             pContext->last_audio_stream = stream_index;
+            pContext->sample_rate = avctx->sample_rate;
             //forced_codec_name = audio_codec_name;
             break;
         case AVMEDIA_TYPE_VIDEO:
@@ -352,9 +465,14 @@ int MediaCore::StreamComponentOpen(int stream_index)
     switch (avctx->codec_type)
     {
         case AVMEDIA_TYPE_AUDIO:
-            sample_rate = avctx->sample_rate;
-            nb_channels = avctx->channels;
-            channel_layout = avctx->channel_layout;
+            pContext->sample_rate = avctx->sample_rate;
+            pContext->nb_channels = avctx->channels;
+            pContext->channel_layout = avctx->channel_layout;
+            createEngine();
+            createMixVolume();
+            createPlayer();
+            LOG("Start Audio Decode Thread\r\n");
+            pthread_create(&pVideoDecodeThreadID, NULL, decodeAudioThread, this);
             break;
         case AVMEDIA_TYPE_VIDEO:
             pContext->video_stream = stream_index;
@@ -366,10 +484,84 @@ int MediaCore::StreamComponentOpen(int stream_index)
             pthread_create(&pVideoDecodeThreadID, NULL, decodeVideoThread, this);
             pContext->queue_attachments_req = 1;
             break;
-        //case AVMEDIA_TYPE_SUBTITLE:
-        //    break;
-        //default:
-        //    break;
+        case AVMEDIA_TYPE_SUBTITLE:
+            break;
+        default:
+            break;
     }
     return 0;
+}
+
+bool  MediaCore::Play()
+{
+    if(pContext->bPause)
+        pContext->bPause = false;
+}
+bool  MediaCore::Pause()
+{
+    if(!pContext->bPause)
+        pContext->bPause = true;
+}
+
+void MediaCore::createEngine()
+{
+    slCreateEngine(&engineObeject, 0, NULL, 0, NULL, NULL);
+    (*engineObeject)->Realize(engineObeject, SL_BOOLEAN_FALSE);
+    (*engineObeject)->GetInterface(engineObeject, SL_IID_ENGINE, &engineEngine);
+}
+
+void MediaCore::createMixVolume()
+{
+    (*engineEngine)->CreateOutputMix(engineEngine, &outputMixObject, 0, 0, 0);
+    (*outputMixObject)->Realize(outputMixObject, SL_BOOLEAN_FALSE);
+    SLresult sLresult = (*outputMixObject)->GetInterface(outputMixObject, SL_IID_ENVIRONMENTALREVERB, &outputMixEnvironmentalReverb);
+    if(SL_RESULT_SUCCESS == sLresult)
+    {
+        (*outputMixEnvironmentalReverb)->SetEnvironmentalReverbProperties(outputMixEnvironmentalReverb, &settings);
+    }
+}
+
+void MediaCore::createPlayer()
+{
+    int rate = pContext->sample_rate;
+    int channels = pContext->nb_channels;
+    SLDataLocator_AndroidBufferQueue android_queue = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
+    SLDataFormat_PCM pcm = {SL_DATAFORMAT_PCM, channels, rate * 1000,
+                            SL_PCMSAMPLEFORMAT_FIXED_16,
+                            SL_PCMSAMPLEFORMAT_FIXED_16,
+                            SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT,
+                            SL_BYTEORDER_LITTLEENDIAN};
+    SLDataSource dataSource = {&android_queue, &pcm};
+    SLDataLocator_OutputMix slDataLocator_outputMix = { SL_DATALOCATOR_OUTPUTMIX, outputMixObject};
+    SLDataSink slDataSink = {&slDataLocator_outputMix, NULL};
+
+    const SLInterfaceID ids[3] = { SL_IID_BUFFERQUEUE, SL_IID_EFFECTSEND, SL_IID_VOLUME};
+    const SLboolean req[3] = { SL_BOOLEAN_FALSE, SL_BOOLEAN_FALSE, SL_BOOLEAN_FALSE};
+    (*engineEngine)->CreateAudioPlayer(engineEngine, &audioPlayer, &dataSource, &slDataSink, 3, ids, req);
+    (*audioPlayer)->Realize(audioPlayer, SL_BOOLEAN_FALSE);
+
+    (*audioPlayer)->GetInterface(audioPlayer, SL_IID_PLAY, &slPlayItf);
+    (*audioPlayer)->GetInterface(audioPlayer, SL_IID_BUFFERQUEUE, &slBufferQueueItf);
+    (*slBufferQueueItf)->RegisterCallback(slBufferQueueItf, pcmCallBack, this);
+    (*slPlayItf)->SetPlayState(slPlayItf, SL_PLAYSTATE_PLAYING);
+}
+
+void MediaCore::realseResource()
+{
+    if(audioPlayer!=NULL){
+        (*audioPlayer)->Destroy(audioPlayer);
+        audioPlayer=NULL;
+        slBufferQueueItf=NULL;
+        slPlayItf=NULL;
+    }
+    if(outputMixObject!=NULL){
+        (*outputMixObject)->Destroy(outputMixObject);
+        outputMixObject=NULL;
+        outputMixEnvironmentalReverb=NULL;
+    }
+    if(engineObeject!=NULL){
+        (*engineObeject)->Destroy(engineObeject);
+        engineObeject=NULL;
+        engineEngine=NULL;
+    }
 }

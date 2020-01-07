@@ -24,3 +24,12 @@ extern "C" JNIEXPORT void JNICALL  Java_com_john_johnplayer_MediaPlayer_playVide
     MediaCore::getInstance()->InitFFmpeg();
     MediaCore::getInstance()->Start();
 }
+
+extern "C" JNIEXPORT jboolean JNICALL  Java_com_john_johnplayer_MediaPlayer_pause(JNIEnv *env,jobject obj)
+{
+
+}
+extern "C" JNIEXPORT jboolean JNICALL  Java_com_john_johnplayer_MediaPlayer_play(JNIEnv *env,jobject obj)
+{
+
+}

@@ -17,7 +17,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private SurfaceHolder surfaceHolder;
     private com.john.johnplayer.MediaPlayer player;
     private Button btPlay,btPause;
-
+    Boolean bInit;
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
@@ -37,6 +37,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         btPlay.setOnClickListener(this);
         btPause = (Button)findViewById(R.id.btPause);
         btPause.setOnClickListener(this);
+
+        bInit = false;
     }
 
     public void onClick(View v)
@@ -44,17 +46,24 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         switch (v.getId())
         {
             case R.id.btPlay:
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        Log.i("MediaCore","App:btPlay");
-                        String path = Environment.getExternalStorageDirectory()+"/1.mp4";
-                        player.playVideo(path,surfaceHolder.getSurface());
-                    }
-                }).start();
+                if(!bInit)
+                {
+                    bInit = true;
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Log.i("MediaCore","App:btPlay");
+                            String path = Environment.getExternalStorageDirectory()+"/1.mp4";
+                            player.playVideo(path,surfaceHolder.getSurface());
+                        }
+                    }).start();
+                }
+                else
+                    player.play();
                 break;
             case R.id.btPause:
-                Log.i("MediaCore","App:btPause");
+                //Log.i("MediaCore","App:btPause");
+                player.pause();
                 break;
         }
     }

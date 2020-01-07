@@ -19,6 +19,8 @@ extern "C"
 #include "libswresample/swresample.h"
 #include "libswscale/swscale.h"
 #include "libavutil/imgutils.h"
+#include <SLES/OpenSLES.h>
+#include <SLES/OpenSLES_Android.h>
 }
 
 #include <pthread.h>
@@ -39,10 +41,15 @@ typedef struct{
     int              scan_all_pmts_set;
 
     int              eof;
+    bool             bPause;
     //audio data
     int              last_audio_stream;
     int              audio_stream;
-    AVStream         *audio_st;
+    AVStream*        audio_st;
+    int              nb_channels;
+    int              sample_rate;
+    int64_t          channel_layout;
+    SwrContext*      swrContext;
 
     //video data
     int              last_video_stream;
@@ -57,23 +64,29 @@ typedef struct{
 class MediaCore {
 private:
     MediaCore();
+    ~MediaCore();
     static MediaCore* pInstance;
     string fileName;
     MediaCoreContext* pContext;
     ANativeWindow*    pWindow;
 public:
     static MediaCore* getInstance();
-    string getVersion();
-    string getFileName()    {   return fileName;    }
-    void setFileName(string file)   {  fileName = file; }
-    void setWindow(ANativeWindow* pWind) { pWindow = pWind; LOG("setWindow\r\n"); }
+    static void releaseInstance();
+    string  getVersion();
+    string  getFileName()                   { return fileName;      }
+    void    setFileName(string file)        { fileName = file;      }
+    void    setWindow(ANativeWindow* pWind) { pWindow = pWind;      }
+    int     getChannels()                   { return pContext->nb_channels; }
+    SwrContext* getSwrContext()             { return pContext->swrContext;  }
 
+    //status control
+    bool Play();
+    bool Pause();
     void InitFFmpeg();
     void Start();
     bool ReadFile();
     bool DecodeVideo();
     bool DecodeAudio();
-    bool RenderVideo();
     /*open a given stream Return 0 if OK*/
     int StreamComponentOpen(int stream_index);
 
@@ -107,13 +120,23 @@ public:
         MediaCore* core = (MediaCore*)params;
         core->DecodeAudio();
     }
+    //audio interface
+    void createEngine();
+    void createMixVolume();
+    void createPlayer();
+    void realseResource();
+    SLObjectItf engineObeject = NULL; //使用SLOjectItf声明引擎接口对象
+    SLEngineItf engineEngine = NULL;    //
 
-    //video render thread
-    pthread_t pVideoRenderThreadID;
-    static void* renderVideoThread(void *params)
-    {
-        MediaCore* core = (MediaCore*)params;
-        core->RenderVideo();
-    }
+    SLObjectItf outputMixObject = NULL;
+    SLEnvironmentalReverbItf outputMixEnvironmentalReverb = NULL;
+    SLEnvironmentalReverbSettings settings = SL_I3DL2_ENVIRONMENT_PRESET_DEFAULT;
+
+    SLObjectItf audioPlayer = NULL;
+    SLPlayItf slPlayItf = NULL;
+    SLAndroidSimpleBufferQueueItf slBufferQueueItf = NULL;
+
+    size_t buffersize = 0;
+    uint8_t *buffer;
 };
 #endif //TESTCPLUSPLUS_MEDIACORE_H
