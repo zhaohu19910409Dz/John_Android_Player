@@ -53,7 +53,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                         @Override
                         public void run() {
                             Log.i("MediaCore","App:btPlay");
-                            String path = Environment.getExternalStorageDirectory()+"/1.mp4";
+                            String path = Environment.getExternalStorageDirectory()+"/2.mp4";
                             player.playVideo(path,surfaceHolder.getSurface());
                         }
                     }).start();

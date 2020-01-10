@@ -49,6 +49,7 @@ typedef struct{
     int              nb_channels;
     int              sample_rate;
     int64_t          channel_layout;
+    AVSampleFormat   bitsSampleFormat;
     SwrContext*      swrContext;
 
     //video data
@@ -78,6 +79,8 @@ public:
     void    setWindow(ANativeWindow* pWind) { pWindow = pWind;      }
     int     getChannels()                   { return pContext->nb_channels; }
     SwrContext* getSwrContext()             { return pContext->swrContext;  }
+    AVSampleFormat getSampleFormat()        { return pContext->bitsSampleFormat;}
+
 
     //status control
     bool Play();
@@ -125,18 +128,28 @@ public:
     void createMixVolume();
     void createPlayer();
     void realseResource();
-    SLObjectItf engineObeject = NULL; //使用SLOjectItf声明引擎接口对象
-    SLEngineItf engineEngine = NULL;    //
+    // engine interfaces
+    SLObjectItf engineObject = NULL;
+    SLEngineItf engineEngine;
 
+// output mix interfaces
     SLObjectItf outputMixObject = NULL;
     SLEnvironmentalReverbItf outputMixEnvironmentalReverb = NULL;
-    SLEnvironmentalReverbSettings settings = SL_I3DL2_ENVIRONMENT_PRESET_DEFAULT;
 
-    SLObjectItf audioPlayer = NULL;
-    SLPlayItf slPlayItf = NULL;
-    SLAndroidSimpleBufferQueueItf slBufferQueueItf = NULL;
+// buffer queue player interfaces
+    SLObjectItf bqPlayerObject = NULL;
+    SLPlayItf bqPlayerPlay;
+    SLAndroidSimpleBufferQueueItf bqPlayerBufferQueue;
+    SLEffectSendItf bqPlayerEffectSend;
+    SLMuteSoloItf bqPlayerMuteSolo;
+    SLVolumeItf bqPlayerVolume;
+// aux effect on the output mix, used by the buffer queue player
+    const SLEnvironmentalReverbSettings reverbSettings = SL_I3DL2_ENVIRONMENT_PRESET_STONECORRIDOR;
 
-    size_t buffersize = 0;
-    uint8_t *buffer;
+    void *buffer;
+    size_t bufferSize;
+
+    uint8_t *outputBuffer;
+    size_t outputBufferSize;
 };
 #endif //TESTCPLUSPLUS_MEDIACORE_H

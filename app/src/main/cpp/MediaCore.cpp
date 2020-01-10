@@ -2,6 +2,7 @@
 // Created by hu zhao on 2019-12-29.
 //
 
+#include <assert.h>
 #include "MediaCore.h"
 MediaCore* MediaCore::pInstance = NULL;
 
@@ -11,21 +12,29 @@ static int ffmpeg_interrupt(void* ctx)
     return 0;
 }
 
-void pcmCallBack(SLAndroidSimpleBufferQueueItf slBufferQueueItf, void * context)
+void bqPlayerCallback1(SLAndroidSimpleBufferQueueItf bq, void * context)
 {
+    LOG("PCM Call Back\r\n");
+    assert(context == NULL);
     MediaCore* pCtx = (MediaCore*)context;
-    pCtx->buffersize = 0;
+    pCtx->bufferSize = 0;
+    //assert(bq == pCtx->slBufferQueueItf);
 
+    //if(pCtx->pAudioFrameQueue->queuen_nb_remaining() == 0)
+    //    return;
     AVFrame* pFrame = pCtx->pAudioFrameQueue->queue_peek_readable();
-#if 0
-    swr_convert(pCtx->getSwrContext(), &pCtx->buffer, 44100 * 2, (const uint8_t**)pFrame->data, pFrame->nb_samples);
-    int size = av_samples_get_buffer_size(NULL, pCtx->getChannels(), pFrame->nb_samples, AV_SAMPLE_FMT_S16, 1);
-    pCtx->buffersize = size;
 
-    if(pCtx->buffer!=NULL && pCtx->buffersize!=0)
+#if 1
+    swr_convert(pCtx->getSwrContext(), &pCtx->outputBuffer, pFrame->nb_samples, (const uint8_t**)pFrame->data, pFrame->nb_samples);
+    int size = av_samples_get_buffer_size(pFrame->linesize, pCtx->getChannels(), pFrame->nb_samples, pCtx->getSampleFormat(), 1);
+    LOG(">> getPcm data_size=%d", size);
+    pCtx->bufferSize = size;
+
+    if(pCtx->buffer!=NULL && pCtx->bufferSize!=0)
     {
         //将得到的数据加入到队列中
-        (*slBufferQueueItf)->Enqueue(slBufferQueueItf,pCtx->buffer,pCtx->buffersize);
+        (*pCtx->bqPlayerBufferQueue)->Enqueue(pCtx->bqPlayerBufferQueue,pCtx->outputBuffer,pCtx->bufferSize);
+        pCtx->bufferSize = 0;
     }
 #endif
     pCtx->pAudioFrameQueue->queue_next();
@@ -74,7 +83,6 @@ MediaCore::~MediaCore()
         delete pAudioFrameQueue;
         pAudioFrameQueue = NULL;
     }
-    realseResource();
 }
 
 void MediaCore::releaseInstance()
@@ -174,7 +182,7 @@ bool MediaCore::ReadFile()
     //6:init video code
     if(pContext->video_stream != -1)
     {
-        StreamComponentOpen(pContext->video_stream);
+        //StreamComponentOpen(pContext->video_stream);
     }
 
     if(pContext->audio_stream != -1)
@@ -232,15 +240,15 @@ bool MediaCore::ReadFile()
 
         if(packet->stream_index == pContext->video_stream)
         {
-            AVPacket* pVideoPacket = pVideoPacketQueue->queue_peek_writable();
-            *pVideoPacket = *packet;
-            pVideoPacketQueue->queue_push();
+            //AVPacket* pVideoPacket = pVideoPacketQueue->queue_peek_writable();
+            //*pVideoPacket = *packet;
+            //pVideoPacketQueue->queue_push();
         }
         else if(packet->stream_index == pContext->audio_stream)
         {
-            //AVPacket* pAudioPacket = pAudioPacketQueue->queue_peek_writable();
-            //*pAudioPacket = *packet;
-            //pAudioPacketQueue->queue_push();
+            AVPacket* pAudioPacket = pAudioPacketQueue->queue_peek_writable();
+            *pAudioPacket = *packet;
+            pAudioPacketQueue->queue_push();
         }
     }
     av_packet_unref(packet);
@@ -274,7 +282,7 @@ bool MediaCore::DecodeVideo()
 
     while(true)
     {
-        if(!pContext->bPause)
+        //if(!pContext->bPause)
         {
             AVPacket* packet = pVideoPacketQueue->queue_peek_readable();
             err = avcodec_send_packet(pContext->videoCtx, packet);
@@ -314,17 +322,13 @@ bool MediaCore::DecodeVideo()
                 uint8_t *bits = (uint8_t *) window_buffer.bits;
                 for (int h = 0; h < videoHeight; h++)
                 {
-                    memcpy(bits + h * window_buffer.stride * 4,
-                           out_buffer + h * rgba_frame->linesize[0],
+                    memcpy(bits + h * window_buffer.stride * 4, \
+                           out_buffer + h * rgba_frame->linesize[0], \
                            rgba_frame->linesize[0]);
                 }
             }
             ANativeWindow_unlockAndPost(pWindow);
             pVideoPacketQueue->queue_next();
-        }
-        else
-        {
-            LOG("pause\r\n");
         }
     }
 }
@@ -344,7 +348,7 @@ bool MediaCore::DecodeAudio()
     enum AVSampleFormat out_format = AV_SAMPLE_FMT_S16;
     int out_sample_rate = pContext->sample_rate;
 
-    swr_alloc_set_opts(pContext->swrContext, out_ch_layout, out_format, out_sample_rate,
+    swr_alloc_set_opts(pContext->swrContext, out_ch_layout, out_format, out_sample_rate, \
             pContext->audioCtx->channel_layout, pContext->audioCtx->sample_fmt, pContext->audioCtx->sample_rate, 0, NULL);
     swr_init(pContext->swrContext);
 
@@ -352,9 +356,10 @@ bool MediaCore::DecodeAudio()
 
     while(true)
     {
-        if(!pContext->bPause)
+        //if(!pContext->bPause)
         {
             AVPacket* packet = pAudioPacketQueue->queue_peek_readable();
+
             int err = avcodec_send_packet(pContext->audioCtx, packet);
             if(err < 0 && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
             {
@@ -378,7 +383,7 @@ bool MediaCore::DecodeAudio()
             AVFrame* f = pAudioFrameQueue->queue_peek_writable();
             *f = *pFrame;
             pAudioFrameQueue->queue_push();
-
+            LOG("Audio:Packet Remains:%d,Frame Remains:%d\r\n",pAudioPacketQueue->queuen_nb_remaining(), pAudioFrameQueue->queuen_nb_remaining());
             pAudioPacketQueue->queue_next();
         }
     }
@@ -468,9 +473,9 @@ int MediaCore::StreamComponentOpen(int stream_index)
             pContext->sample_rate = avctx->sample_rate;
             pContext->nb_channels = avctx->channels;
             pContext->channel_layout = avctx->channel_layout;
+            pContext->bitsSampleFormat = avctx->sample_fmt;
             createEngine();
             createMixVolume();
-            createPlayer();
             LOG("Start Audio Decode Thread\r\n");
             pthread_create(&pVideoDecodeThreadID, NULL, decodeAudioThread, this);
             break;
@@ -505,63 +510,117 @@ bool  MediaCore::Pause()
 
 void MediaCore::createEngine()
 {
-    slCreateEngine(&engineObeject, 0, NULL, 0, NULL, NULL);
-    (*engineObeject)->Realize(engineObeject, SL_BOOLEAN_FALSE);
-    (*engineObeject)->GetInterface(engineObeject, SL_IID_ENGINE, &engineEngine);
-}
+    LOG(">> initOpenSLES...");
+    SLresult result;
 
+    // 1、create engine
+    result = slCreateEngine(&engineObject, 0, NULL, 0, NULL, NULL);
+    LOG(">> initOpenSLES... step 1, result = %d", result);
+
+    // 2、realize the engine
+    result = (*engineObject)->Realize(engineObject, SL_BOOLEAN_FALSE);
+    LOG(">> initOpenSLES...step 2, result = %d", result);
+
+    // 3、get the engine interface, which is needed in order to create other objects
+    result = (*engineObject)->GetInterface(engineObject, SL_IID_ENGINE, &engineEngine);
+    LOG(">> initOpenSLES...step 3, result = %d", result);
+
+    // 4、create output mix, with environmental reverb specified as a non-required interface
+    const SLInterfaceID ids[1] = {SL_IID_ENVIRONMENTALREVERB};
+    const SLboolean req[1] = {SL_BOOLEAN_FALSE};
+    result = (*engineEngine)->CreateOutputMix(engineEngine, &outputMixObject, 0, 0, 0);
+    LOG(">> initOpenSLES...step 4, result = %d", result);
+
+    // 5、realize the output mix
+    result = (*outputMixObject)->Realize(outputMixObject, SL_BOOLEAN_FALSE);
+    LOG(">> initOpenSLES...step 5, result = %d", result);
+
+    // 6、get the environmental reverb interface
+    // this could fail if the environmental reverb effect is not available,
+    // either because the feature is not present, excessive CPU load, or
+    // the required MODIFY_AUDIO_SETTINGS permission was not requested and granted
+    result = (*outputMixObject)->GetInterface(outputMixObject, SL_IID_ENVIRONMENTALREVERB,
+                                              &outputMixEnvironmentalReverb);
+    if (SL_RESULT_SUCCESS == result) {
+        result = (*outputMixEnvironmentalReverb)->SetEnvironmentalReverbProperties(
+                outputMixEnvironmentalReverb, &reverbSettings);
+        LOG(">> initOpenSLES...step 6, result = %d", result);
+    }
+}
+#define LOGD LOG
 void MediaCore::createMixVolume()
 {
-    (*engineEngine)->CreateOutputMix(engineEngine, &outputMixObject, 0, 0, 0);
-    (*outputMixObject)->Realize(outputMixObject, SL_BOOLEAN_FALSE);
-    SLresult sLresult = (*outputMixObject)->GetInterface(outputMixObject, SL_IID_ENVIRONMENTALREVERB, &outputMixEnvironmentalReverb);
-    if(SL_RESULT_SUCCESS == sLresult)
-    {
-        (*outputMixEnvironmentalReverb)->SetEnvironmentalReverbProperties(outputMixEnvironmentalReverb, &settings);
-    }
-}
-
-void MediaCore::createPlayer()
-{
+    LOGD(">> initBufferQueue");
+    SLresult result;
+    int channel = pContext->nb_channels;
     int rate = pContext->sample_rate;
-    int channels = pContext->nb_channels;
-    SLDataLocator_AndroidBufferQueue android_queue = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
-    SLDataFormat_PCM pcm = {SL_DATAFORMAT_PCM, channels, rate * 1000,
-                            SL_PCMSAMPLEFORMAT_FIXED_16,
-                            SL_PCMSAMPLEFORMAT_FIXED_16,
-                            SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT,
-                            SL_BYTEORDER_LITTLEENDIAN};
-    SLDataSource dataSource = {&android_queue, &pcm};
-    SLDataLocator_OutputMix slDataLocator_outputMix = { SL_DATALOCATOR_OUTPUTMIX, outputMixObject};
-    SLDataSink slDataSink = {&slDataLocator_outputMix, NULL};
+    int bitsPerSample = pContext->bitsSampleFormat;
+    // configure audio source
+    SLDataLocator_AndroidSimpleBufferQueue loc_bufq = {SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, 2};
+    SLDataFormat_PCM format_pcm;
+    format_pcm.formatType = SL_DATAFORMAT_PCM;
+    format_pcm.numChannels = channel;
+    format_pcm.samplesPerSec = rate * 1000;
+    format_pcm.bitsPerSample = bitsPerSample;
+    format_pcm.containerSize = 16;
+    if (channel == 2)
+        format_pcm.channelMask = SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
+    else
+        format_pcm.channelMask = SL_SPEAKER_FRONT_CENTER;
+    format_pcm.endianness = SL_BYTEORDER_LITTLEENDIAN;
+    SLDataSource audioSrc = {&loc_bufq, &format_pcm};
 
-    const SLInterfaceID ids[3] = { SL_IID_BUFFERQUEUE, SL_IID_EFFECTSEND, SL_IID_VOLUME};
-    const SLboolean req[3] = { SL_BOOLEAN_FALSE, SL_BOOLEAN_FALSE, SL_BOOLEAN_FALSE};
-    (*engineEngine)->CreateAudioPlayer(engineEngine, &audioPlayer, &dataSource, &slDataSink, 3, ids, req);
-    (*audioPlayer)->Realize(audioPlayer, SL_BOOLEAN_FALSE);
+    // configure audio sink
+    SLDataLocator_OutputMix loc_outmix = {SL_DATALOCATOR_OUTPUTMIX, outputMixObject};
+    SLDataSink audioSnk = {&loc_outmix, NULL};
 
-    (*audioPlayer)->GetInterface(audioPlayer, SL_IID_PLAY, &slPlayItf);
-    (*audioPlayer)->GetInterface(audioPlayer, SL_IID_BUFFERQUEUE, &slBufferQueueItf);
-    (*slBufferQueueItf)->RegisterCallback(slBufferQueueItf, pcmCallBack, this);
-    (*slPlayItf)->SetPlayState(slPlayItf, SL_PLAYSTATE_PLAYING);
-}
+    // create audio player
+    const SLInterfaceID ids[3] = {SL_IID_BUFFERQUEUE, SL_IID_EFFECTSEND,
+            /*SL_IID_MUTESOLO,*/ SL_IID_VOLUME};
+    const SLboolean req[3] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE,
+            /*SL_BOOLEAN_TRUE,*/ SL_BOOLEAN_TRUE};
+    result = (*engineEngine)->CreateAudioPlayer(engineEngine, &bqPlayerObject, &audioSrc, &audioSnk,
+                                                3, ids, req);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
 
-void MediaCore::realseResource()
-{
-    if(audioPlayer!=NULL){
-        (*audioPlayer)->Destroy(audioPlayer);
-        audioPlayer=NULL;
-        slBufferQueueItf=NULL;
-        slPlayItf=NULL;
-    }
-    if(outputMixObject!=NULL){
-        (*outputMixObject)->Destroy(outputMixObject);
-        outputMixObject=NULL;
-        outputMixEnvironmentalReverb=NULL;
-    }
-    if(engineObeject!=NULL){
-        (*engineObeject)->Destroy(engineObeject);
-        engineObeject=NULL;
-        engineEngine=NULL;
-    }
+    // realize the player
+    result = (*bqPlayerObject)->Realize(bqPlayerObject, SL_BOOLEAN_FALSE);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
+
+    // get the play interface
+    result = (*bqPlayerObject)->GetInterface(bqPlayerObject, SL_IID_PLAY, &bqPlayerPlay);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
+
+    // get the buffer queue interface
+    result = (*bqPlayerObject)->GetInterface(bqPlayerObject, SL_IID_BUFFERQUEUE,
+                                             &bqPlayerBufferQueue);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
+
+    // register callback on the buffer queue
+    result = (*bqPlayerBufferQueue)->RegisterCallback(bqPlayerBufferQueue, bqPlayerCallback1, NULL);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
+
+    // get the effect send interface
+    result = (*bqPlayerObject)->GetInterface(bqPlayerObject, SL_IID_EFFECTSEND,
+                                             &bqPlayerEffectSend);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
+
+    // get the volume interface
+    result = (*bqPlayerObject)->GetInterface(bqPlayerObject, SL_IID_VOLUME, &bqPlayerVolume);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
+
+    // set the player's state to playing
+    result = (*bqPlayerPlay)->SetPlayState(bqPlayerPlay, SL_PLAYSTATE_PLAYING);
+    assert(SL_RESULT_SUCCESS == result);
+    (void)result;
+
+    outputBufferSize = 8196;
+    outputBuffer = (uint8_t*)av_malloc(sizeof(uint8_t) * outputBufferSize);
 }

@@ -9,7 +9,8 @@ add_library(
         SHARED
         native-lib.cpp
         MediaCore.cpp
-        JQueue.cpp)
+        JQueue.cpp
+        SLAudio.cpp)
 
 find_library(
         log-lib
